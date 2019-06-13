@@ -1,0 +1,129 @@
+- job:
+    name: Gerrit_Maven_Artifactory
+    project-type: pipeline
+    sandbox: true
+    triggers:
+      - gerrit:
+          trigger-on:
+            - patchset-created-event:
+                exclude-drafts: true
+                exclude-trivial-rebase: true
+                exclude-no-code-change: true
+          projects:
+            - project-compare-type: 'PLAIN'
+              project-pattern: 'Gerrit_Trigger'
+              branches:
+                - branch-compare-type: 'PLAIN'
+                  branch-pattern: 'master'
+                - branch-compare-type: 'PLAIN'
+                  branch-pattern: 'stable'
+          skip-vote:
+              successful: true
+              failed: true
+              unstable: true
+              notbuilt: true
+
+          server-name: Demo_Gerrit1_new_test 
+    pipeline:
+    dsl: |
+        def Keyword_check = '1'
+        def server =   Artifactory.newServer url: 'http://10.138.77.186:34444/artifactory', 
+        credentialsId: 'a8b401a6-9f19-44e5-a6cd-2d513fbac7dd' 
+        def rtMaven = Artifactory.newMavenBuild()
+        server.bypassProxy = true
+        def buildInfo
+        rtMaven.tool = 'Demo_Maven'
+        pipeline
+        {
+        agent any
+        triggers {
+            gerrit customUrl: '',
+            gerritProjects: [[branches: [[compareType: 'PLAIN', pattern: 'master'], 
+            [compareType: 'PLAIN', pattern: 'stable']], compareType: 'PLAIN', 
+            disableStrictForbiddenFileVerification: false, pattern: 'Gerrit_Trigger']], 
+            serverName:  'Demo_Gerrit1_new_test', 
+            triggerOnEvents: [patchsetCreated(excludeDrafts: true, excludeNoCodeChange: true, excludeTrivialRebase: true), 
+            commentAdded(commentAddedTriggerApprovalValue: '1', verdictCategory: 'Verified')]
+                }
+        stages{
+            stage("Clone"){
+                steps {
+                    checkout([$class: 'GitSCM',
+                    branches: [[name: 'origin/master']],
+                    branches: [[name: '$GERRIT_REFSPEC']], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [],
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[
+                    credentialsId: 'd176c572-4ff9-4164-8d87-bcbac221027e',
+                    refspec: 'refs/changes/*:refs/changes/*',
+                    url: 'http://10.138.77.186:32222/Gerrit_Trigger.git']]])  
+                    script {
+                        echo "Keyword_check_before_clone: ${Keyword_check}"
+                        Keyword_check = sh(returnStatus: true, script: 'git log -1 | grep LOW')
+                        echo "Keyword_check_after_clone: ${Keyword_check}"
+                        sh 'sleep 30'
+                            }
+                       }    
+                    }
+            stage ('Maven') {
+                steps {
+                    script{  
+                        rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean install'
+                        echo "Executing Maven"
+                        sh 'sleep 30'
+                        }
+                    }
+            when{
+                expression{
+                return (Keyword_check != 0) 
+                            }
+                    }
+                }
+            stage("Artifactory configuration"){
+                steps {
+                    script{
+                        rtMaven.deployer releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local', server: server
+                        rtMaven.deployer.deployArtifacts = true // Disable artifacts deployment during Maven run  
+                        buildInfo = Artifactory.newBuildInfo()
+                            }   
+                        }
+                    }
+            stage ('Publish build info') {
+                steps{
+                    script{
+                        server.publishBuildInfo buildInfo
+                        echo "Executing Publish build"
+                        sh 'sleep 40'
+                            }
+                        }
+            when{
+                expression{
+                     return (Keyword_check != 0) 
+                        }
+                    }
+                } 
+            stage ('Install') {
+                steps {
+                    script{     
+                        echo "Executing Install"
+                        sh 'sleep 50'
+                            } 
+                        }
+                    }
+            stage ('Deploy') {
+                steps {
+                    script{
+                        echo "executing Deploy"
+                        sh 'sleep 30'
+                            }
+                        }
+            when{
+                expression{
+                      return (Keyword_check != 0) 
+                            }
+                        }
+                     }
+                }   
+            }   
+

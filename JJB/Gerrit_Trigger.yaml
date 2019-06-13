@@ -1,0 +1,116 @@
+- job:
+    name: Test_Gerrit_Trigger123
+    project-type: pipeline
+    sandbox: true
+    triggers:
+      - gerrit:
+          trigger-on:
+            - patchset-created-event:
+                exclude-drafts: true
+                exclude-trivial-rebase: true
+                exclude-no-code-change: true
+            - comment-added-event:
+                approval-category: 'APRV'
+                approval-value: 1
+          projects:
+            - project-compare-type: 'PLAIN'
+              project-pattern: 'MyProject'
+              branches:
+                - branch-compare-type: 'PLAIN'
+                  branch-pattern: 'master'
+                - branch-compare-type: 'PLAIN'
+                  branch-pattern: 'stable'
+          skip-vote:
+              successful: true
+              failed: true
+              unstable: true
+              notbuilt: true
+
+          server-name: Demo_Gerrit 
+    pipeline:
+    dsl: |
+        def Keyword_check = '1'
+        pipeline
+        {
+        agent any
+        stages{
+          stage("Clone"){
+            steps {
+              checkout([$class: 'GitSCM',
+              branches: [[name: 'origin/master']],
+              branches: [[name: '$GERRIT_REFSPEC']], 
+              // branches: [[name: '**']],
+              doGenerateSubmoduleConfigurations: false, 
+              extensions: [],
+              submoduleCfg: [],
+              userRemoteConfigs: [[
+              credentialsId: '27c6889f-132c-4818-9772-b776e2045a81',
+              refspec: 'refs/changes/*:refs/changes/*',
+              //refspec: 'refs/heads/master/*:refs/heads/master/*',
+              url: 'http://10.138.77.32:32877/MyProject.git']]])
+                script {
+                  echo "Keyword_check_before_clone: ${Keyword_check}"
+                  Keyword_check = sh(returnStatus: true, script: 'git log -1 | grep LOW')
+                  echo "Keyword_check_after_clone: ${Keyword_check}"
+                  sh 'sleep 30'
+                       }
+                   }    
+               }
+          stage("Artifactory configuration"){
+            steps {
+                script{
+                 echo "Executing Artifactory configuration phase"
+                 sh 'sleep 30'
+                     }
+                  }   
+               }
+
+          stage ('Test') {
+            steps {
+                script{  
+                  echo "Executing Test"
+                  sh 'sleep 30'
+                      }
+                   }
+           when{
+            expression{
+                      return (Keyword_check != 0) 
+                      }
+                 }
+              }  
+          stage ('Install') {
+            steps {
+                script{     
+                  echo "Executing Install"
+                  sh 'sleep 50'
+                      } 
+                   }
+                }
+          stage ('Deploy') {
+            steps {
+                 script{
+                   echo "executing Deploy"
+                   sh 'sleep 30'
+                       }
+                    }
+            when{
+             expression{
+                          return (Keyword_check != 0) 
+                      }
+                   }
+               }
+          stage ('Publish build info') {
+            steps{
+                script{
+                  echo "Executing Publish build"
+                  sh 'sleep 40'
+                      }
+                   }
+            when{
+                expression{
+                         return (Keyword_check != 0) 
+                          }
+                       }
+                   } 
+               }
+           }    
